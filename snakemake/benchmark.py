@@ -524,6 +524,8 @@ def benchmarked(pid=None, benchmark_record=None, interval=BENCHMARK_INTERVAL, th
             pass
     """
     result = benchmark_record or BenchmarkRecord(threads=threads)
+    benchmark_record.snakemake_threads=threads
+
     if pid is False:
         yield result
     else:
