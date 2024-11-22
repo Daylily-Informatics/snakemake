@@ -176,7 +176,8 @@ class BenchmarkRecord:
                 "nproc",
                 "instance_type",
                 "region_az",
-                "spot_cost"                
+                "spot_cost", 
+                "snakemake_threads"                
             )
         )
 
@@ -191,6 +192,7 @@ class BenchmarkRecord:
         io_out=None,
         cpu_usages=None,
         cpu_time=None,
+        threads=None,
     ):
         #: Running time in seconds
         self.running_time = running_time
@@ -221,7 +223,10 @@ class BenchmarkRecord:
         self.skipped_procs = set()
         #: Track if data has been collected
         self.data_collected = False
+        # Threads from snakemake
+        self.snakemake_threads= threads or 'NA'
 
+        
     def to_tsv(self):
         """Return ``str`` with the TSV representation of this record"""
 
@@ -288,7 +293,8 @@ class BenchmarkRecord:
                         aws_deets[2],
                         aws_deets[3],
                         aws_deets[4],
-                        aws_deets[5]
+                        aws_deets[5],
+                        self.snakemake_threads
                     ),
                 )
             )
@@ -302,6 +308,7 @@ class BenchmarkRecord:
                 [
                     "{:.4f}".format(self.running_time),
                     timedelta_to_str(datetime.timedelta(seconds=self.running_time)),
+                    "NA",
                     "NA",
                     "NA",
                     "NA",
@@ -500,7 +507,7 @@ class BenchmarkTimer(ScheduledPeriodicTimer):
 
 
 @contextlib.contextmanager
-def benchmarked(pid=None, benchmark_record=None, interval=BENCHMARK_INTERVAL):
+def benchmarked(pid=None, benchmark_record=None, interval=BENCHMARK_INTERVAL, threads=None):
     """Measure benchmark parameters while within the context manager
 
     Yields a ``BenchmarkRecord`` with the results (values are set after
@@ -516,7 +523,7 @@ def benchmarked(pid=None, benchmark_record=None, interval=BENCHMARK_INTERVAL):
         with benchmarked() as bench_result:
             pass
     """
-    result = benchmark_record or BenchmarkRecord()
+    result = benchmark_record or BenchmarkRecord(threads=threads)
     if pid is False:
         yield result
     else:

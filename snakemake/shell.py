@@ -284,7 +284,7 @@ class shell:
         if bench_record is not None:
             from snakemake.benchmark import benchmarked
 
-            with benchmarked(proc.pid, bench_record):
+            with benchmarked(proc.pid, bench_record, threads=threads):
                 retcode = proc.wait()
         else:
             retcode = proc.wait()
