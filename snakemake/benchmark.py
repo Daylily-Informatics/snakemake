@@ -277,8 +277,16 @@ class BenchmarkRecord:
             nproc=aws_deets[2]
             spot_cost=aws_deets[5]
             task_cost='NA'
-            if type(nproc)==int and type(spot_cost)==float and type(self.snakemake_threads)==int:
-                task_cost=(nproc/self.snakemake_threads)*spot_cost
+
+            
+            try:
+                np=float(nproc)
+                sc=float(spot_cost)
+                st=int(self.snakemake_threads)
+                rt=float(self.running_time)/60.0
+                task_cost=(st/np)*(sc*rt)
+            except Exception as e:
+                task_cost='na'
 
             return "\t".join(
                 map(
@@ -301,7 +309,7 @@ class BenchmarkRecord:
                         aws_deets[4],
                         spot_cost,
                         self.snakemake_threads,
-                        task_cost
+                        "{:.5f}".format(task_cost)
                     ),
                 )
             )
