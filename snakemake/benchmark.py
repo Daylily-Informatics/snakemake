@@ -283,8 +283,8 @@ class BenchmarkRecord:
                 np=float(nproc)
                 sc=float(spot_cost)
                 st=int(self.snakemake_threads)
-                rt=float(self.running_time)/60.0
-                task_cost="{:.5f}".format((st/np)*(sc*rt))
+                rt_hrs=float(float(self.running_time)/60.0)/60.0
+                task_cost="{:.6f}".format((st/np)*(sc*rt_hrs))
             except Exception as e:
                 task_cost='na'
 
