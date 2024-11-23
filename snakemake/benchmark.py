@@ -177,10 +177,10 @@ class BenchmarkRecord:
                 "instance_type",
                 "region_az",
                 "spot_cost", 
-                "snakemake_threads"                
+                "snakemake_threads",
+                "task_cost"                
             )
         )
-
     def __init__(
         self,
         running_time=None,
@@ -274,6 +274,12 @@ class BenchmarkRecord:
         if self.data_collected:
             
             aws_deets = get_aws_deets()
+            nproc=aws_deets[2]
+            spot_cost=aws_deets[5]
+            task_cost='NA'
+            if type(nproc)==int and type(spot_cost)==float and type(self.snakemake_threads)==int:
+                task_cost=(nproc/self.snakemake_threads)*spot_cost
+
             return "\t".join(
                 map(
                     to_tsv_str,
@@ -290,11 +296,12 @@ class BenchmarkRecord:
                         self.cpu_time,
                         aws_deets[0],
                         aws_deets[1],
-                        aws_deets[2],
+                        nproc,
                         aws_deets[3],
                         aws_deets[4],
-                        aws_deets[5],
-                        self.snakemake_threads
+                        spot_cost,
+                        self.snakemake_threads,
+                        task_cost
                     ),
                 )
             )
