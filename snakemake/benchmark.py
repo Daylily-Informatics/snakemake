@@ -281,7 +281,7 @@ class BenchmarkRecord:
             cpu_efficiency = 'NA'
 
             try:
-                cpu_efficiency="{:.4f}"(float(self.cpu_time)/float(self.running_time))
+                cpu_efficiency="{:.4f}".format(float(self.cpu_time)/float(self.running_time))
             except Exception as e:
                 cpu_efficiency='NA'
             
