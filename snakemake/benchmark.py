@@ -174,6 +174,7 @@ class BenchmarkRecord:
                 "hostname",
                 "ip",
                 "nproc",
+                "cpu_efficiency",
                 "instance_type",
                 "region_az",
                 "spot_cost", 
@@ -277,14 +278,21 @@ class BenchmarkRecord:
             nproc=aws_deets[2]
             spot_cost=aws_deets[5]
             task_cost='NA'
+            cpu_efficiency = 'NA'
 
+            try:
+                cpu_efficiency="{:.4f}"(float(self.cpu_time)/float(self.running_time))
+            except Exception as e:
+                cpu_efficiency='NA'
             
             try:
                 np=float(nproc)
+                "{:.2f}".format((self.cpu_usages / self.running_time)/np)
                 sc=float(spot_cost)
                 st=int(self.snakemake_threads)
                 rt_hrs=float(float(self.running_time)/60.0)/60.0
                 task_cost="{:.6f}".format((st/np)*(sc*rt_hrs))
+                
             except Exception as e:
                 task_cost='na'
 
@@ -305,6 +313,7 @@ class BenchmarkRecord:
                         aws_deets[0],
                         aws_deets[1],
                         nproc,
+                        cpu_efficiency,
                         aws_deets[3],
                         aws_deets[4],
                         spot_cost,
@@ -323,6 +332,7 @@ class BenchmarkRecord:
                 [
                     "{:.4f}".format(self.running_time),
                     timedelta_to_str(datetime.timedelta(seconds=self.running_time)),
+                    "NA",
                     "NA",
                     "NA",
                     "NA",
