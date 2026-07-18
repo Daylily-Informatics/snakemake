@@ -8,7 +8,7 @@ requires = [
 [tool.versioneer]
 VCS = "git"
 style = "pep440"
-tag_prefix = "v"
+tag_prefix = ""
 versionfile_build = "snakemake/_version.py"
 versionfile_source = "snakemake/_version.py"
 
