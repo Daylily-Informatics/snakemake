@@ -2039,6 +2039,8 @@ benchmarks the
 Since version 8.11.0, it is possible to have extra benchmark metrics with the command ``--benchmark-extended``:
 
 * `jobid`: Internal job ID,
+* `attempt`: One-based execution attempt number,
+* `status`: Attempt outcome (`success`, `failed`, or `aborted`),
 * `rule_name`: Rule name,
 * `wildcards`: Job wildcards,
 * `params`: Job parameters,
@@ -2048,6 +2050,10 @@ Since version 8.11.0, it is possible to have extra benchmark metrics with the co
 * `input_size_mb`: Size of input files (MiB),
 
 of the command ``somecommand`` for the given output and input files.
+
+Extended benchmark files preserve one row for a failed or aborted attempt and
+append later retry attempts to the same file. This makes retry cost and runtime
+auditable without replacing the failed-attempt record with the successful one.
 
 For this, the shell or run body of the rule is executed on that data, and all run times are stored into the given benchmark `tsv` file (which will contain a tab-separated table of run times and memory usage in MiB).
 Per default, Snakemake executes the job once, generating one run time.

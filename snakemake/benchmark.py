@@ -41,6 +41,8 @@ class BenchmarkRecord:
         if extended_fmt:
             header += [
                 "jobid",
+                "attempt",
+                "status",
                 "rule_name",
                 "wildcards",
                 "params",
@@ -55,6 +57,8 @@ class BenchmarkRecord:
     def __init__(
         self,
         jobid=None,
+        attempt=None,
+        status=None,
         rule_name=None,
         wildcards=None,
         params=None,
@@ -73,6 +77,10 @@ class BenchmarkRecord:
     ):
         #: Job ID
         self.jobid = (jobid,)
+        #: One-based execution attempt number
+        self.attempt = attempt
+        #: Attempt outcome (success, failed, or aborted)
+        self.status = status
         #: Rule name
         self.rule_name = (rule_name,)
         #: Job wildcards
@@ -113,6 +121,13 @@ class BenchmarkRecord:
         self.skipped_procs = set()
         #: Track if data has been collected
         self.data_collected = False
+        #: Wrapper timestamp used when a failure occurs before a process timer starts
+        self.start_time = time.time()
+
+    def finalize(self):
+        """Ensure failed or aborted attempts still have an elapsed runtime."""
+        if self.running_time is None:
+            self.running_time = time.time() - self.start_time
 
     def timedelta_to_str(self, x):
         """Conversion of timedelta to str without fractions of seconds"""
@@ -187,6 +202,8 @@ class BenchmarkRecord:
         if extended_fmt:
             record += [
                 self.jobid,
+                self.attempt,
+                self.status,
                 self.rule_name,
                 self.parse_wildcards(),
                 self.parse_params(),
@@ -427,15 +444,18 @@ def benchmarked(pid=None, benchmark_record=None, interval=BENCHMARK_INTERVAL):
         start_time = time.time()
         bench_thread = BenchmarkTimer(int(pid or os.getpid()), result, interval)
         bench_thread.start()
-        yield result
-        bench_thread.cancel()
-        result.running_time = time.time() - start_time
+        try:
+            yield result
+        finally:
+            bench_thread.cancel()
+            result.running_time = time.time() - start_time
 
 
-def print_benchmark_tsv(records, file_, extended_fmt):
+def print_benchmark_tsv(records, file_, extended_fmt, include_header=True):
     """Write benchmark records to file-like the object"""
     logger.debug("Benchmarks in TSV format")
-    print("\t".join(BenchmarkRecord.get_header(extended_fmt)), file=file_)
+    if include_header:
+        print("\t".join(BenchmarkRecord.get_header(extended_fmt)), file=file_)
     for r in records:
         print(r.to_tsv(extended_fmt), file=file_)
 
@@ -447,10 +467,16 @@ def print_benchmark_jsonl(records, file_, extended_fmt):
         print(r.to_json(extended_fmt), file=file_)
 
 
-def write_benchmark_records(records, path, extended_fmt):
+def write_benchmark_records(records, path, extended_fmt, append=False):
     """Write benchmark records to file at path"""
-    with open(path, "wt") as f:
+    path_exists = os.path.exists(path) and os.path.getsize(path) > 0
+    with open(path, "at" if append else "wt") as f:
         if path.endswith(".jsonl"):
             print_benchmark_jsonl(records, f, extended_fmt)
         else:
-            print_benchmark_tsv(records, f, extended_fmt)
+            print_benchmark_tsv(
+                records,
+                f,
+                extended_fmt,
+                include_header=not append or not path_exists,
+            )

@@ -3,6 +3,7 @@ __copyright__ = "Copyright 2022, Johannes Köster"
 __email__ = "johannes.koester@uni-due.de"
 __license__ = "MIT"
 
+import csv
 import os
 import shutil
 import sys
@@ -368,6 +369,80 @@ def test_benchmark():
 @skip_on_windows
 def test_benchmark_jsonl():
     run(dpath("test_benchmark_jsonl"), benchmark_extended=True, check_md5=False)
+
+
+@skip_on_windows
+def test_failed_benchmark_attempts_are_preserved(tmp_path):
+    (tmp_path / "Snakefile").write_text(
+        """
+from pathlib import Path
+
+
+rule all:
+    input:
+        "done.txt",
+        "shell-done.txt",
+
+
+rule retried:
+    output:
+        "done.txt"
+    benchmark:
+        "benchmark.tsv"
+    run:
+        marker = Path(".first_attempt_finished")
+        if not marker.exists():
+            marker.touch()
+            raise ValueError("intentional first-attempt failure")
+        Path(output[0]).write_text("done\\n")
+
+
+rule shell_retried:
+    output:
+        "shell-done.txt"
+    benchmark:
+        "shell-benchmark.tsv"
+    shell:
+        "if [[ ! -e .first_shell_attempt_finished ]]; then "
+        "touch .first_shell_attempt_finished; exit 1; "
+        "else printf 'shell done\\\\n' > {output}; fi"
+"""
+    )
+    sp.run(
+        [
+            sys.executable,
+            "-m",
+            "snakemake",
+            "--scheduler",
+            "greedy",
+            "--retries",
+            "1",
+            "--benchmark-extended",
+            "--cores",
+            "1",
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
+
+    with (tmp_path / "benchmark.tsv").open(newline="") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    assert [(row["attempt"], row["status"]) for row in rows] == [
+        ("1", "failed"),
+        ("2", "success"),
+    ]
+    assert [row["rule_name"] for row in rows] == ["retried", "retried"]
+
+    with (tmp_path / "shell-benchmark.tsv").open(newline="") as handle:
+        shell_rows = list(csv.DictReader(handle, delimiter="\t"))
+    assert [(row["attempt"], row["status"]) for row in shell_rows] == [
+        ("1", "failed"),
+        ("2", "success"),
+    ]
+    assert [row["rule_name"] for row in shell_rows] == [
+        "shell_retried",
+        "shell_retried",
+    ]
 
 
 def test_temp_expand():
