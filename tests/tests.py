@@ -6,6 +6,7 @@ __license__ = "MIT"
 import os
 import sys
 import uuid
+import csv
 import subprocess as sp
 from pathlib import Path
 
@@ -352,7 +353,106 @@ def test_wildcard_keyword():
 
 @skip_on_windows
 def test_benchmark():
-    run(dpath("test_benchmark"), check_md5=False)
+    run(dpath("test_benchmark"), check_md5=False, scheduler="greedy")
+
+
+@skip_on_windows
+def test_failed_benchmark_attempts_are_preserved(tmp_path):
+    (tmp_path / "Snakefile").write_text(
+        """
+from pathlib import Path
+
+
+rule all:
+    input:
+        "done.txt",
+        "shell-done.txt",
+
+
+rule retried:
+    output:
+        "done.txt"
+    benchmark:
+        "benchmark.tsv"
+    run:
+        marker = Path(".first_attempt_finished")
+        if not marker.exists():
+            marker.touch()
+            raise ValueError("intentional first-attempt failure")
+        Path(output[0]).write_text("done\\n")
+
+
+rule shell_retried:
+    output:
+        "shell-done.txt"
+    benchmark:
+        "shell-benchmark.tsv"
+    shell:
+        "if [[ ! -e .first_shell_attempt_finished ]]; then "
+        "touch .first_shell_attempt_finished; exit 1; "
+        "else printf 'shell done\\\\n' > {output}; fi"
+"""
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.getcwd()
+    env["SLURM_JOB_ID"] = "987654"
+    sp.run(
+        [
+            sys.executable,
+            "-m",
+            "snakemake",
+            "--scheduler",
+            "greedy",
+            "--restart-times",
+            "1",
+            "--cores",
+            "1",
+        ],
+        cwd=tmp_path,
+        env=env,
+        check=True,
+    )
+
+    for path, rule_name in (
+        (tmp_path / "benchmark.tsv", "retried"),
+        (tmp_path / "shell-benchmark.tsv", "shell_retried"),
+    ):
+        with path.open(newline="") as handle:
+            rows = list(csv.DictReader(handle, delimiter="\t"))
+        assert all(None not in row for row in rows)
+        assert [(row["attempt"], row["status"]) for row in rows] == [
+            ("1", "failed"),
+            ("2", "success"),
+        ]
+        assert [row["slurm_jobid"] for row in rows] == ["987654", "987654"]
+        assert all(row["snakemake_jobid"] not in ("", "-") for row in rows)
+        assert all(row["start_datetime"].endswith("Z") for row in rows)
+        assert all(row["end_datetime"].endswith("Z") for row in rows)
+        assert len({row["snakemake_jobid"] for row in rows}) == 1, rule_name
+
+
+def test_benchmark_nullable_identifiers_and_datetimes():
+    from snakemake.benchmark import BenchmarkRecord
+
+    record = BenchmarkRecord(
+        running_time=0.0,
+        attempt=1,
+        status="failed",
+        snakemake_jobid=42,
+        slurm_jobid=None,
+        start_datetime=None,
+        end_datetime=None,
+    )
+    header = BenchmarkRecord.get_header().split("\t")
+    values = record.to_tsv().split("\t")
+    assert len(values) == len(header)
+    row = dict(zip(header, values))
+    assert row["attempt"] == "1"
+    assert row["status"] == "failed"
+    assert row["snakemake_jobid"] == "42"
+    assert row["slurm_jobid"] == "-"
+    assert row["start_datetime"] == "-"
+    assert row["end_datetime"] == "-"
 
 
 def test_temp_expand():

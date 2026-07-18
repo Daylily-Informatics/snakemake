@@ -1645,6 +1645,14 @@ benchmarks the
 
 of the command ``somecommand`` for the given output and input files.
 
+The Daylily benchmark format also records the one-based ``attempt`` number,
+the attempt ``status`` (``success``, ``failed``, or ``aborted``), the owning
+``snakemake_jobid``, the nullable ``slurm_jobid`` from ``SLURM_JOB_ID``, and
+nullable UTC ``start_datetime`` and ``end_datetime`` fields. Failed and aborted
+attempts are written before their error is propagated, and subsequent retry
+attempts are appended to the same benchmark file without replacing earlier
+rows.
+
 For this, the shell or run body of the rule is executed on that data, and all run times are stored into the given benchmark tsv file (which will contain a tab-separated table of run times and memory usage in MiB).
 Per default, Snakemake executes the job once, generating one run time.
 However, the benchmark file can be annotated with the desired number of repeats, e.g.,

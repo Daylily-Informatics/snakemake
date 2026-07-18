@@ -572,6 +572,7 @@ class CPUExecutor(RealExecutor):
             self.workflow.cleanup_scripts,
             job.shadow_dir,
             job.jobid,
+            job.attempt,
             self.workflow.edit_notebook if self.dag.is_edit_notebook_job(job) else None,
             self.workflow.conda_base_path,
             job.rule.basedir,
@@ -2453,6 +2454,7 @@ def run_wrapper(
     cleanup_scripts,
     shadow_dir,
     jobid,
+    attempt,
     edit_notebook,
     conda_base_path,
     basedir,
@@ -2483,7 +2485,7 @@ def run_wrapper(
         from snakemake.benchmark import (
             BenchmarkRecord,
             benchmarked,
-            write_benchmark_records,
+            utc_now_iso,
         )
 
     # Change workdir if shadow defined and not using singularity.
@@ -2493,10 +2495,10 @@ def run_wrapper(
         passed_shadow_dir = shadow_dir
         shadow_dir = None
 
+    bench_records = []
     try:
         with change_working_directory(shadow_dir):
             if benchmark:
-                bench_records = []
                 for bench_iteration in range(benchmark_repeats):
                     # Determine whether to benchmark this process or do not
                     # benchmarking at all.  We benchmark this process unless the
@@ -2508,11 +2510,19 @@ def run_wrapper(
                         or job_rule.wrapper
                         or job_rule.cwl
                     )
+                    bench_record = BenchmarkRecord(
+                        threads=threads,
+                        attempt=attempt,
+                        status="failed",
+                        snakemake_jobid=jobid,
+                        slurm_jobid=os.environ.get("SLURM_JOB_ID"),
+                        start_datetime=utc_now_iso(),
+                    )
+                    bench_records.append(bench_record)
                     if is_sub:
                         # The benchmarking through ``benchmarked()`` is started
                         # in the execution of the shell fragment, script, wrapper
                         # etc, as the child PID is available there.
-                        bench_record = BenchmarkRecord()
                         run(
                             input,
                             output,
@@ -2543,7 +2553,10 @@ def run_wrapper(
                         # The benchmarking is started here as we have a run section
                         # and the generated Python function is executed in this
                         # process' thread.
-                        with benchmarked() as bench_record:
+                        with benchmarked(
+                            benchmark_record=bench_record,
+                            threads=threads,
+                        ):
                             run(
                                 input,
                                 output,
@@ -2570,8 +2583,7 @@ def run_wrapper(
                                 basedir,
                                 runtime_sourcecache_path,
                             )
-                    # Store benchmark record for this iteration
-                    bench_records.append(bench_record)
+                    bench_record.finalize(status="success")
             else:
                 run(
                     input,
@@ -2602,8 +2614,21 @@ def run_wrapper(
     except (KeyboardInterrupt, SystemExit) as e:
         # Re-raise the keyboard interrupt in order to record an error in the
         # scheduler but ignore it
+        for bench_record in bench_records:
+            if bench_record.status == "failed":
+                bench_record.status = "aborted"
+        _write_benchmark_records_for_attempt(
+            bench_records,
+            benchmark,
+            attempt,
+        )
         raise e
     except (Exception, BaseException) as ex:
+        _write_benchmark_records_for_attempt(
+            bench_records,
+            benchmark,
+            attempt,
+        )
         # this ensures that exception can be re-raised in the parent thread
         origin = get_exception_origin(ex, linemaps)
         if origin is not None:
@@ -2618,8 +2643,27 @@ def run_wrapper(
             # some internal bug, just reraise
             raise ex
 
-    if benchmark is not None:
-        try:
-            write_benchmark_records(bench_records, benchmark)
-        except (Exception, BaseException) as ex:
-            raise WorkflowError(ex)
+    _write_benchmark_records_for_attempt(
+        bench_records,
+        benchmark,
+        attempt,
+    )
+
+
+def _write_benchmark_records_for_attempt(bench_records, benchmark, attempt):
+    if benchmark is None or not bench_records:
+        return
+
+    from snakemake.benchmark import write_benchmark_records
+
+    try:
+        for bench_record in bench_records:
+            bench_record.finalize()
+            bench_record.attempt = attempt
+        write_benchmark_records(
+            bench_records,
+            benchmark,
+            append=attempt > 1,
+        )
+    except (Exception, BaseException) as ex:
+        raise WorkflowError(ex)

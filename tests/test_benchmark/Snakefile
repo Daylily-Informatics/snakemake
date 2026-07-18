@@ -1,4 +1,9 @@
+import shlex
+import sys
 import time
+
+
+PYTHON = shlex.quote(sys.executable)
 
 
 rule all:
@@ -14,7 +19,7 @@ rule bench_shell:
         repeat("test.benchmark_shell.txt", 2)
     threads: 2
     shell:
-        "stress --cpu {threads} --timeout 10"
+        "{PYTHON} -c 'sum(i * i for i in range(5000000))'"
 
 
 rule bench_script:

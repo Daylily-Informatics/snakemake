@@ -21,6 +21,12 @@ BENCHMARK_INTERVAL = 30
 BENCHMARK_INTERVAL_SHORT = 0.5
 
 
+def utc_now_iso():
+    """Return the current UTC time in an ISO 8601 representation."""
+    return (
+        datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    )
+
 
 import requests
 import socket
@@ -177,11 +183,18 @@ class BenchmarkRecord:
                 "cpu_efficiency",
                 "instance_type",
                 "region_az",
-                "spot_cost", 
+                "spot_cost",
                 "snakemake_threads",
-                "task_cost"                
+                "task_cost",
+                "attempt",
+                "status",
+                "snakemake_jobid",
+                "slurm_jobid",
+                "start_datetime",
+                "end_datetime",
             )
         )
+
     def __init__(
         self,
         running_time=None,
@@ -194,6 +207,12 @@ class BenchmarkRecord:
         cpu_usages=None,
         cpu_time=None,
         threads=None,
+        attempt=None,
+        status=None,
+        snakemake_jobid=None,
+        slurm_jobid=None,
+        start_datetime=None,
+        end_datetime=None,
     ):
         #: Running time in seconds
         self.running_time = running_time
@@ -225,9 +244,29 @@ class BenchmarkRecord:
         #: Track if data has been collected
         self.data_collected = False
         # Threads from snakemake
-        self.snakemake_threads= threads or 'NA'
+        self.snakemake_threads = threads or "NA"
+        #: One-based execution attempt number
+        self.attempt = attempt
+        #: Attempt outcome (success, failed, or aborted)
+        self.status = status
+        #: Owning scheduler identifiers. Slurm is unavailable outside a Slurm job.
+        self.snakemake_jobid = snakemake_jobid
+        self.slurm_jobid = slurm_jobid
+        #: UTC execution interval. Either value may be unavailable.
+        self.start_datetime = start_datetime
+        self.end_datetime = end_datetime
+        #: Wall-clock fallback for failures before process benchmarking begins.
+        self._start_time = time.time()
 
-        
+    def finalize(self, status=None):
+        """Finalize a record without requiring resource samples or datetimes."""
+        if self.running_time is None:
+            self.running_time = time.time() - self._start_time
+        if status is not None:
+            self.status = status
+        if self.end_datetime is None:
+            self.end_datetime = utc_now_iso()
+
     def to_tsv(self):
         """Return ``str`` with the TSV representation of this record"""
 
@@ -318,7 +357,13 @@ class BenchmarkRecord:
                         aws_deets[4],
                         spot_cost,
                         self.snakemake_threads,
-                        task_cost
+                        task_cost,
+                        self.attempt,
+                        self.status,
+                        self.snakemake_jobid,
+                        self.slurm_jobid,
+                        self.start_datetime,
+                        self.end_datetime,
                     ),
                 )
             )
@@ -348,6 +393,13 @@ class BenchmarkRecord:
                     "NA",
                     "NA",
                     "NA",
+                    "NA",
+                    to_tsv_str(self.attempt),
+                    to_tsv_str(self.status),
+                    to_tsv_str(self.snakemake_jobid),
+                    to_tsv_str(self.slurm_jobid),
+                    to_tsv_str(self.start_datetime),
+                    to_tsv_str(self.end_datetime),
                 ]
             )
 
@@ -532,7 +584,9 @@ class BenchmarkTimer(ScheduledPeriodicTimer):
 
 
 @contextlib.contextmanager
-def benchmarked(pid=None, benchmark_record=None, interval=BENCHMARK_INTERVAL, threads=None):
+def benchmarked(
+    pid=None, benchmark_record=None, interval=BENCHMARK_INTERVAL, threads=None
+):
     """Measure benchmark parameters while within the context manager
 
     Yields a ``BenchmarkRecord`` with the results (values are set after
@@ -548,8 +602,13 @@ def benchmarked(pid=None, benchmark_record=None, interval=BENCHMARK_INTERVAL, th
         with benchmarked() as bench_result:
             pass
     """
-    result = benchmark_record or BenchmarkRecord(threads=threads)
-    benchmark_record.snakemake_threads=threads
+    result = benchmark_record or BenchmarkRecord(
+        threads=threads,
+        start_datetime=utc_now_iso(),
+    )
+    if result.start_datetime is None:
+        result.start_datetime = utc_now_iso()
+    result.snakemake_threads = threads or result.snakemake_threads
 
     if pid is False:
         yield result
@@ -557,19 +616,30 @@ def benchmarked(pid=None, benchmark_record=None, interval=BENCHMARK_INTERVAL, th
         start_time = time.time()
         bench_thread = BenchmarkTimer(int(pid or os.getpid()), result, interval)
         bench_thread.start()
-        yield result
-        bench_thread.cancel()
-        result.running_time = time.time() - start_time
+        try:
+            yield result
+        finally:
+            bench_thread.cancel()
+            result.running_time = time.time() - start_time
+            if result.end_datetime is None:
+                result.end_datetime = utc_now_iso()
 
 
-def print_benchmark_records(records, file_):
+def print_benchmark_records(records, file_, include_header=True):
     """Write benchmark records to file-like the object"""
-    print(BenchmarkRecord.get_header(), file=file_)
+    if include_header:
+        print(BenchmarkRecord.get_header(), file=file_)
     for r in records:
         print(r.to_tsv(), file=file_)
 
 
-def write_benchmark_records(records, path):
+def write_benchmark_records(records, path, append=False):
     """Write benchmark records to file at path"""
-    with open(path, "wt") as f:
-        print_benchmark_records(records, f)
+    path = str(path)
+    path_exists = os.path.exists(path) and os.path.getsize(path) > 0
+    with open(path, "at" if append else "wt") as f:
+        print_benchmark_records(
+            records,
+            f,
+            include_header=not append or not path_exists,
+        )
